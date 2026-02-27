@@ -8,16 +8,44 @@
 #include <kwin/opengl/glshadermanager.h>
 #include <kwin/opengl/glvertexbuffer.h>
 
-#include <cmath>
 #include <epoxy/gl.h>
-#include <vector>
 
-ScreenCornersEffect::ScreenCornersEffect() = default;
+static const char *fragmentShaderSourceV2 = R"(#version 140
+in vec2 v_uv;
+out vec4 fragColor;
+uniform float cornerX; // 0.0 = left, 1.0 = right
+uniform float aaWidth; // anti-aliasing width in UV space
+void main() {
+    vec2 center = vec2(1.0 - cornerX, 1.0);
+    float dist = length(v_uv - center);
+    float alpha = smoothstep(1.0 - aaWidth, 1.0 + aaWidth, dist);
+    fragColor = vec4(0.0, 0.0, 0.0, alpha);
+}
+)";
+
+static const char *vertexShaderSourceV2 = R"(#version 140
+in vec2 position;
+in vec2 texcoord;
+out vec2 v_uv;
+uniform mat4 modelViewProjectionMatrix;
+void main() {
+    v_uv = texcoord;
+    gl_Position = modelViewProjectionMatrix * vec4(position, 0.0, 1.0);
+}
+)";
+
+ScreenCornersEffect::ScreenCornersEffect()
+{
+    m_shader = KWin::ShaderManager::instance()->loadShaderFromCode(
+        QByteArray(vertexShaderSourceV2),
+        QByteArray(fragmentShaderSourceV2));
+}
+
 ScreenCornersEffect::~ScreenCornersEffect() = default;
 
 bool ScreenCornersEffect::isActive() const
 {
-    return true;
+    return m_shader && m_shader->isValid();
 }
 
 int ScreenCornersEffect::requestedEffectChainPosition() const
@@ -39,31 +67,38 @@ void ScreenCornersEffect::paintScreen(const KWin::RenderTarget &renderTarget,
     if (screen && !screen->isInternal()) {
         return;
     }
+    if (!m_shader || !m_shader->isValid()) {
+        return;
+    }
 
-    // projectionMatrix works in device pixel coordinates
     const qreal scale = viewport.scale();
     const auto targetSize = renderTarget.size();
     const float w = targetSize.width();
-    const float h = targetSize.height();
     const float r = m_cornerRadius * scale;
-    const int segments = 32;
 
-    KWin::GLShader *shader = KWin::ShaderManager::instance()->pushShader(KWin::ShaderTrait::UniformColor);
-    shader->setUniform(KWin::GLShader::Mat4Uniform::ModelViewProjectionMatrix, viewport.projectionMatrix());
+    // AA width in UV space: ~1.5 device pixels mapped to 0..1 UV range
+    const float aaWidth = 1.5f / r;
 
-    auto drawCorner = [&](float cornerX, float cornerY, float cx, float cy,
-                          float startAngle) {
-        std::vector<KWin::GLVertex2D> vertices;
-        vertices.reserve(segments * 3);
+    KWin::ShaderManager::instance()->pushShader(m_shader.get());
+    m_shader->setUniform(KWin::GLShader::Mat4Uniform::ModelViewProjectionMatrix, viewport.projectionMatrix());
+    m_shader->setUniform("aaWidth", aaWidth);
 
-        for (int i = 0; i < segments; i++) {
-            const float a1 = startAngle + (M_PI / 2.0f) * i / segments;
-            const float a2 = startAngle + (M_PI / 2.0f) * (i + 1) / segments;
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-            vertices.push_back({QVector2D(cornerX, cornerY), QVector2D(0, 0)});
-            vertices.push_back({QVector2D(cx + r * std::cos(a1), cy - r * std::sin(a1)), QVector2D(0, 0)});
-            vertices.push_back({QVector2D(cx + r * std::cos(a2), cy - r * std::sin(a2)), QVector2D(0, 0)});
-        }
+    auto drawCorner = [&](float x, float y, float cornerX) {
+        m_shader->setUniform("cornerX", cornerX);
+
+        // Quad covering the corner area, UV always 0..1 from top-left to bottom-right
+        const std::array<KWin::GLVertex2D, 6> vertices = {{
+            {QVector2D(x, y),         QVector2D(0, 0)},
+            {QVector2D(x + r, y),     QVector2D(1, 0)},
+            {QVector2D(x + r, y + r), QVector2D(1, 1)},
+
+            {QVector2D(x, y),         QVector2D(0, 0)},
+            {QVector2D(x + r, y + r), QVector2D(1, 1)},
+            {QVector2D(x, y + r),     QVector2D(0, 1)},
+        }};
 
         KWin::GLVertexBuffer *vbo = KWin::GLVertexBuffer::streamingBuffer();
         vbo->reset();
@@ -71,11 +106,12 @@ void ScreenCornersEffect::paintScreen(const KWin::RenderTarget &renderTarget,
         vbo->render(GL_TRIANGLES);
     };
 
-    // Top-left: corner at (0,0), circle center at (r, r)
-    drawCorner(0, 0, r, r, M_PI / 2.0f);
+    // Top-left corner: quad at (0, 0), circle center at UV (1, 1)
+    drawCorner(0, 0, 0.0f);
 
-    // Top-right: corner at (w,0), circle center at (w-r, r)
-    drawCorner(w, 0, w - r, r, 0.0f);
+    // Top-right corner: quad at (w-r, 0), circle center at UV (0, 1)
+    drawCorner(w - r, 0, 1.0f);
 
     KWin::ShaderManager::instance()->popShader();
+    glDisable(GL_BLEND);
 }

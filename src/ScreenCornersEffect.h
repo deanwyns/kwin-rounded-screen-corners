@@ -1,6 +1,12 @@
 #pragma once
 
 #include <kwin/effect/effect.h>
+#include <memory>
+
+namespace KWin
+{
+class GLShader;
+}
 
 class ScreenCornersEffect : public KWin::Effect
 {
@@ -20,5 +26,6 @@ public:
     int requestedEffectChainPosition() const override;
 
 private:
+    std::unique_ptr<KWin::GLShader> m_shader;
     int m_cornerRadius = 20; // logical pixels
 };
