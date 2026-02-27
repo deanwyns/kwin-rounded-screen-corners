@@ -4,6 +4,8 @@ A KWin effect that renders smooth, anti-aliased rounded corners on your screen e
 
 Currently draws corners at the top of the internal (laptop) screen only.
 
+![Preview](assets/preview.jpeg)
+
 ## Building
 
 Requires KDE Plasma 6 / KWin 6 development packages.
