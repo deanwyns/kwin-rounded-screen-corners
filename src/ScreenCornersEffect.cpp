@@ -15,10 +15,11 @@ in vec2 v_uv;
 out vec4 fragColor;
 uniform float cornerX; // 0.0 = left, 1.0 = right
 uniform float aaWidth; // anti-aliasing width in UV space
+uniform float radius;  // circle radius in UV space (slightly > 1.0 to compensate for pixel centers)
 void main() {
     vec2 center = vec2(1.0 - cornerX, 1.0);
     float dist = length(v_uv - center);
-    float alpha = smoothstep(1.0 - aaWidth, 1.0 + aaWidth, dist);
+    float alpha = smoothstep(radius - aaWidth, radius + aaWidth, dist);
     fragColor = vec4(0.0, 0.0, 0.0, alpha);
 }
 )";
@@ -79,9 +80,14 @@ void ScreenCornersEffect::paintScreen(const KWin::RenderTarget &renderTarget,
     // AA width in UV space: ~1.5 device pixels mapped to 0..1 UV range
     const float aaWidth = 1.5f / r;
 
+    // Extend circle radius by 0.5 device pixels to compensate for pixel-center sampling,
+    // so the rounded edge aligns flush with the screen edge instead of 1px inward.
+    const float radius = 1.0f + 0.5f / r;
+
     KWin::ShaderManager::instance()->pushShader(m_shader.get());
     m_shader->setUniform(KWin::GLShader::Mat4Uniform::ModelViewProjectionMatrix, viewport.projectionMatrix());
     m_shader->setUniform("aaWidth", aaWidth);
+    m_shader->setUniform("radius", radius);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
