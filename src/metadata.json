@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Dean"
+            }
+        ],
+        "Category": "Appearance",
+        "Description": "Draws rounded black corners at the top of the internal (laptop) screen",
+        "EnabledByDefault": false,
+        "Id": "kwin_effect_roundedscreencorners",
+        "License": "GPL",
+        "Name": "Rounded Screen Corners"
+    }
+}
